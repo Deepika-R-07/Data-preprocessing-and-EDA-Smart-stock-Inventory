@@ -1,0 +1,121 @@
+import pandas as pd
+import numpy as np
+import streamlit as st
+import matplotlib.pyplot as plt
+import os
+
+
+st.set_page_config(page_title="Smart Inventory Dashboard", layout="wide")
+
+
+DATA_PATH = "data/forecast_results.csv"
+
+if not os.path.exists(DATA_PATH):
+    st.error("⚠ Run forecasting first (Milestone 2) to generate `forecast_results.csv`!")
+    st.stop()
+
+df = pd.read_csv(DATA_PATH)
+date_col = None
+for col in df.columns:
+    if "date" in col.lower():
+        date_col = col
+        break
+
+if date_col is None:
+    st.error("❌ No date column found in forecast_results.csv")
+    st.stop()
+
+df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+product_col = "Product Name" if "Product Name" in df.columns else "Product ID"
+
+st.sidebar.header("🔍 Product Selection")
+
+all_products = sorted(df[product_col].unique())
+selected_product = st.sidebar.selectbox("Select Product", all_products)
+
+st.sidebar.write("---")
+st.sidebar.header("📦 EOQ Settings")
+
+annual_demand = st.sidebar.number_input("Annual Demand (units)", min_value=100, value=1000)
+order_cost = st.sidebar.number_input("Order Cost per order (₹)", min_value=1.0, value=50.0)
+holding_cost = st.sidebar.number_input("Holding Cost per unit per year (₹)", min_value=0.1, value=5.0)
+lead_time = st.sidebar.number_input("Lead Time (days)", min_value=1, value=7)
+std_dev_demand = st.sidebar.number_input("Demand Std. Dev (per day)", min_value=1.0, value=15.0)
+service_level = st.sidebar.slider("Service Level", 0.80, 0.99, 0.95)
+
+
+def calc_eoq(D, S, H):
+    return np.sqrt((2 * D * S) / H)
+
+def calc_rop(daily_demand, L, std_dev, z):
+    return daily_demand * L + z * std_dev * np.sqrt(L)
+
+z_table = {0.80: 0.84, 0.85: 1.04, 0.90: 1.28, 0.95: 1.65, 0.99: 2.33}
+z = z_table.get(round(service_level, 2), 1.65)
+
+daily_demand = annual_demand / 365
+eoq = calc_eoq(annual_demand, order_cost, holding_cost)
+rop = calc_rop(daily_demand, lead_time, std_dev_demand, z)
+
+st.title("📊 Smart Inventory Optimization Dashboard")
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Selected Product", selected_product)
+col2.metric("Optimal EOQ", f"{eoq:.2f} units")
+col3.metric("Reorder Point", f"{rop:.2f} units")
+
+st.markdown("---")
+
+
+filtered = df[df[product_col] == selected_product].sort_values(by=date_col)
+
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(filtered[date_col], filtered["forecast_best"], marker="o", label="Forecasted Sales", color="#1f77b4")
+
+if len(filtered) > 8:
+    tick_idx = np.linspace(0, len(filtered) - 1, 8, dtype=int)
+    ax.set_xticks(filtered[date_col].iloc[tick_idx])
+ax.set_xticklabels([d.strftime("%d-%b") for d in filtered[date_col].iloc[tick_idx]], rotation=30)
+
+ax.set_title(f"📈 30-Day Sales Forecast – {selected_product}")
+ax.set_xlabel("Date")
+ax.set_ylabel("Forecasted Sales")
+ax.legend()
+ax.grid(True, linestyle="--", alpha=0.6)
+st.pyplot(fig)
+
+st.markdown("### 📘 Inventory Policy Summary")
+st.write(f"""
+- **Product:** {selected_product}  
+- **Economic Order Quantity (EOQ):** {eoq:.2f} units  
+- **Reorder Point (ROP):** {rop:.2f} units  
+- **Lead Time:** {lead_time} days  
+- **Service Level:** {service_level*100:.0f}%  
+- **Safety Stock:** {z*std_dev_demand*np.sqrt(lead_time):.2f} units  
+""")
+
+st.markdown("---")
+st.subheader("🔤 ABC Classification")
+
+
+np.random.seed(0)
+abc_df = pd.DataFrame({
+    product_col: all_products,
+    "Annual Value": np.random.uniform(10000, 100000, len(all_products))
+})
+abc_df = abc_df.sort_values(by="Annual Value", ascending=False).reset_index(drop=True)
+abc_df["Cumulative %"] = 100 * abc_df["Annual Value"].cumsum() / abc_df["Annual Value"].sum()
+
+def classify(p):
+    if p <= 80:
+        return "A"
+    elif p <= 95:
+        return "B"
+    else:
+        return "C"
+
+abc_df["Category"] = abc_df["Cumulative %"].apply(classify)
+st.dataframe(abc_df)
+
+st.markdown("---")
+st.caption("Developed for Smart Inventory Management – Milestone 3")

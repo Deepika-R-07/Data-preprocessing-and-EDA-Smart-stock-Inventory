@@ -13,7 +13,7 @@ if not os.path.exists("data/forecast_results.csv"):
     st.error("⚠ Run forecasting first! 'data/forecast_results.csv' not found.")
     st.stop()
 
-df = pd.read_csv("forecast_results.csv")
+df = pd.read_csv("data/forecast_results.csv")
 st.write("📊 Forecast Summary:", df["forecast_best"].describe())
 st.write("📝 Columns in Dataset:", df.columns)
 
